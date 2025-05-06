@@ -322,8 +322,22 @@ int smu_resolve_cpu_class(struct pci_dev* dev) {
         return 0;
     }
 
+    // Zen5
+    else if (cpu_family == 0x1A) {
+        switch(cpu_model) {
+            case 0x02:
+            case 0x10:
+                g_smu.codename = CODENAME_TURIN;
+                break;
+            default:
+                pr_err("CPUID: Unknown Zen5 processor model: 0x%X (CPUID: 0x%08X)", cpu_model, cpuid);
+                return -2;
+        }
+        return 0;
+    }
+
     else {
-        pr_err("CPUID: failed to detect Zen/Zen+/Zen2/Zen3/Zen4 processor family (%Xh).", cpu_family);
+        pr_err("CPUID: failed to detect Zen/Zen+/Zen2/Zen3/Zen4/Zen5 processor family (%Xh).", cpu_family);
         return -1;
     }
 }
@@ -348,6 +362,11 @@ int smu_init(struct pci_dev* dev) {
             g_smu.addr_rsmu_mb_rsp  = 0x3B10570;
             g_smu.addr_rsmu_mb_args = 0x3B10A40;
             goto LOG_RSMU;
+        case CODENAME_TURIN:
+            g_smu.addr_rsmu_mb_cmd  = 0x3b10924;
+            g_smu.addr_rsmu_mb_rsp  = 0x3B10970;
+            g_smu.addr_rsmu_mb_args = 0x3B10A40;
+            goto LOG_RSMU;
         case CODENAME_COLFAX:
         case CODENAME_NAPLES:
         case CODENAME_SUMMITRIDGE:
@@ -370,7 +389,7 @@ int smu_init(struct pci_dev* dev) {
             g_smu.addr_rsmu_mb_rsp  = 0x3B10A80;
             g_smu.addr_rsmu_mb_args = 0x3B10A88;
             goto LOG_RSMU;
-        case CODENAME_VANGOGH:        
+        case CODENAME_VANGOGH:
             pr_debug("RSMU Mailbox: Not supported or unknown, disabling use.");
             goto MP1_DETECT;
         default:
@@ -391,6 +410,11 @@ LOG_RSMU:
         case CODENAME_CHAGALL:
         case CODENAME_RAPHAEL:
             g_smu.addr_hsmp_mb_cmd = 0x3B10534;
+            g_smu.addr_hsmp_mb_rsp = 0x3B10980;
+            g_smu.addr_hsmp_mb_args = 0x3B109E0;
+            goto LOG_HSMP;
+        case CODENAME_TURIN:
+            g_smu.addr_hsmp_mb_cmd = 0x3B10934;
             g_smu.addr_hsmp_mb_rsp = 0x3B10980;
             g_smu.addr_hsmp_mb_args = 0x3B109E0;
             goto LOG_HSMP;
@@ -453,6 +477,12 @@ MP1_DETECT:
             g_smu.addr_mp1_mb_rsp   = 0x3B1057C;
             g_smu.addr_mp1_mb_args  = 0x3B109C4;
             break;
+        case CODENAME_TURIN:
+            g_smu.mp1_if_ver        = IF_VERSION_11;
+            g_smu.addr_mp1_mb_cmd   = 0x3B10930;
+            g_smu.addr_mp1_mb_rsp   = 0x3B1097C;
+            g_smu.addr_mp1_mb_args  = 0x3B109C4;
+            break;
         case CODENAME_RENOIR:
         case CODENAME_LUCIENNE:
         case CODENAME_CEZANNE:
@@ -508,6 +538,7 @@ const char* getCodeName(enum smu_processor_codename codename)
       case CODENAME_CHAGALL: return "Chagall";
       case CODENAME_RAPHAEL: return "Raphael";
       case CODENAME_PHOENIX: return "Phoenix";
+      case CODENAME_TURIN: return "Turin";
       default: return "Undefined";
    }
 }
@@ -570,6 +601,7 @@ u64 smu_get_dram_base_address(struct pci_dev* dev) {
         case CODENAME_CASTLEPEAK:
         case CODENAME_MILAN:
         case CODENAME_CHAGALL:
+        case CODENAME_TURIN:
             fn[0] = 0x06;
             goto BASE_ADDR_CLASS_1;
         case CODENAME_RAPHAEL:
@@ -683,6 +715,7 @@ enum smu_return_val smu_transfer_table_to_dram(struct pci_dev* dev) {
             fn = 0x05;
             break;
         case CODENAME_RAPHAEL:
+        case CODENAME_TURIN:
             fn = 0x03;
             break;
         case CODENAME_CEZANNE:
@@ -736,6 +769,7 @@ enum smu_return_val smu_transfer_2nd_table_to_dram(struct pci_dev* dev) {
             break;
         case CODENAME_SUMMITRIDGE:
         case CODENAME_THREADRIPPER:
+        case CODENAME_TURIN:
         case CODENAME_NAPLES:
         case CODENAME_CASTLEPEAK:
         case CODENAME_MATISSE:
@@ -775,6 +809,7 @@ enum smu_return_val smu_get_pm_table_version(struct pci_dev* dev, u32* version) 
             fn = 0x08;
             break;
         case CODENAME_RAPHAEL:
+        case CODENAME_TURIN:
             fn = 0x05;
             break;
         case CODENAME_RENOIR:
@@ -944,6 +979,15 @@ u32 smu_update_pmtable_size(u32 version) {
                     goto UNKNOWN_PM_TABLE_VERSION;
             }
             break;
+        case CODENAME_TURIN:
+            switch (version) {
+                case 0x005E0802:
+                    g_smu.pm_dram_map_size = 0x1A00; //TODO: Max size, find correct size
+                    break;
+                default:
+                    goto UNKNOWN_PM_TABLE_VERSION;
+            }
+            break;
 
         default:
             return SMU_Return_Unsupported;
@@ -975,6 +1019,7 @@ enum smu_return_val smu_read_pm_table(struct pci_dev* dev, unsigned char* dst, s
         if (g_smu.codename == CODENAME_VERMEER  ||
             g_smu.codename == CODENAME_MATISSE  ||
             g_smu.codename == CODENAME_RAPHAEL  ||
+            g_smu.codename == CODENAME_TURIN  ||
             g_smu.codename == CODENAME_RENOIR   ||
             g_smu.codename == CODENAME_LUCIENNE ||
             g_smu.codename == CODENAME_REMBRANDT  ||

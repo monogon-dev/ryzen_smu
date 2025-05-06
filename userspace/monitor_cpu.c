@@ -349,6 +349,9 @@ void get_fuse_topology(int fam, int model, unsigned int* ccds_enabled, unsigned 
     if (fam == 0x17 && model != 0x71) {
         ccd_fuse1 += 0x40;
         ccd_fuse2 += 0x40;
+    } else if (fam == 0x1A) {
+        ccd_fuse1 += 0x1A4; //TODO: Check if this is correct
+        ccd_fuse2 += 0x1A4;
     }
 
     if (smu_read_smn_addr(&obj, ccd_fuse1, &ccds_present) != SMU_Return_OK ||

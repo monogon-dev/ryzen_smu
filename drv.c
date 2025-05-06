@@ -33,6 +33,8 @@ MODULE_LICENSE("GPL");
 #define PCI_DEVICE_ID_AMD_17H_MA0H_ROOT    0x14b5
 #define PCI_DEVICE_ID_AMD_19H_M60H_ROOT    0x14d8
 #define PCI_DEVICE_ID_AMD_19H_M70H_ROOT    0x14e8
+#define PCI_DEVICE_ID_AMD_1AH_M00H_ROOT    0x153a
+#define PCI_DEVICE_ID_AMD_1AH_M20H_ROOT    0x1507
 
 #define MAX_ATTRS_LEN                      13
 
@@ -76,6 +78,8 @@ static struct ryzen_smu_data {
     .pm_table_version     = 0,
     .pm_table_read_size   = PM_TABLE_MAX_SIZE,
 };
+
+static int loaded = 0;
 
 /* SMU Command Parameters. */
 uint smu_timeout_attempts = 8192;
@@ -331,7 +335,13 @@ static int ryzen_smu_probe(struct pci_dev *dev, const struct pci_device_id *id) 
 
     g_driver.device = dev;
 
+    if (loaded) {
+        pr_err("Driver already loaded");
+        return -EBUSY;
+    }
+
     pr_info("loading version: %s", THIS_MODULE->version);
+    pr_debug("Device: %04x:%04x", dev->vendor, dev->device);
 
     // Clamp values.
     if (smu_timeout_attempts > SMU_RETRIES_MAX)
@@ -345,14 +355,16 @@ static int ryzen_smu_probe(struct pci_dev *dev, const struct pci_device_id *id) 
         return -ENODEV;
     }
 
+    pr_debug("ryzen_smu_get_version - MAILBOX_TYPE_MP1");
     // Check if MP1 is working as we guarantee this support.
     if (ryzen_smu_get_version(MAILBOX_TYPE_MP1, 1) != 0) {
         pr_err("Failed to obtain the SMU version");
         return -EINVAL;
     }
 
+    pr_debug("ryzen_smu_get_version - MAILBOX_TYPE_RSMU");
     // Check if RSMU is valid to determine if to skip PM table setup.
-    if (ryzen_smu_get_version(MAILBOX_TYPE_RSMU, 0) == 0) {
+    if (ryzen_smu_get_version(MAILBOX_TYPE_RSMU, 1) == 0) {
         // We do something absolutely stupid here and use relative offsets to overwrite offsets
         //  in the drv_attrs[] array.
         //
@@ -365,6 +377,7 @@ static int ryzen_smu_probe(struct pci_dev *dev, const struct pci_device_id *id) 
         goto _CONTINUE_SETUP;
     }
 
+    pr_debug("smu_transfer_table_to_dram");
     // Check that PM table options are supported before adding it to the attr list
     ret = smu_transfer_table_to_dram(g_driver.device);
     if (ret == SMU_Return_OK) {
@@ -412,10 +425,13 @@ _CONTINUE_SETUP:
     if (sysfs_create_group(g_driver.drv_kobj, &drv_attr_group))
         kobject_put(g_driver.drv_kobj);
 
+    loaded = 1;
     return 0;
 }
 
 static void ryzen_smu_remove(struct pci_dev *dev) {
+    loaded = 0;
+
     // Free allocated resources as well as the SMU
     if (g_driver.pm_table)
         kfree(g_driver.pm_table);
@@ -434,6 +450,8 @@ static struct pci_device_id ryzen_smu_id_table[] = {
     { PCI_DEVICE(PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_17H_MA0H_ROOT) },
     { PCI_DEVICE(PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_19H_M60H_ROOT) },
     { PCI_DEVICE(PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_19H_M70H_ROOT) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_1AH_M00H_ROOT) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_1AH_M20H_ROOT) },
     { }
 };
 MODULE_DEVICE_TABLE(pci, ryzen_smu_id_table);
